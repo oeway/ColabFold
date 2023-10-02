@@ -611,7 +611,7 @@ OPT_DEFAULT = {"N":None, "L":None,
                "max_msa_clusters":512, "max_extra_msa":1024,
                "is_training":False}
 
-def prep_model_runner(opt=None, model_name="model_5", old_runner=None, params_loc='./alphafold/data'):
+def prep_model_runner(opt=None, model_name="model_5", old_runner=None, params_loc='./alphafold/data',user_perturbation=False):
   
   # setup the [opt]ions
   if opt is None:
@@ -639,14 +639,24 @@ def prep_model_runner(opt=None, model_name="model_5", old_runner=None, params_lo
     cfg.model.num_recycle = opt["max_recycles"]
     cfg.model.recycle_tol = opt["tol"]
     cfg.data.eval.num_ensemble = opt["num_ensemble"]
-
+    message=""
     params = data.get_model_haiku_params(name, params_loc)
-    return {"model":model.RunModel(cfg, params, is_training=opt["is_training"]), "opt":opt}
+    if len(user_perturbation) != 3 and user_perturbation:
+        raise AssertionError("User perturbation has to be an array of length 3: [scope, name, stdev]")
+    if user_perturbation[0] in params.keys():
+        if user_perturbation[1] in params[user_perturbation[0]].keys():
+           current_array = params[user_perturbation[0]][user_perturbation[1]] 
+           low, high = np.min(current_array),np.max(current_array)
+           stdev = user_perturbation[2]
+           params[user_perturbation[0]][user_perturbation[1]] += np.random.normal(0.0,stdev*(high-low),size=current_array.shape)
+           message = f"Successfully perturbed feature {user_perturbation[1]} in the layer called {user_perturbation[0]} with the standard deviation {stdev} "
+
+    return {"model":model.RunModel(cfg, params, is_training=opt["is_training"]), "opt":opt,"scopes":params,"message":message}
   else:
     return old_runner
   
 def run_alphafold(feature_dict, opt=None, runner=None, num_models=5, num_samples=1, subsample_msa=True,
-                  pad_feats=False, rank_by="pLDDT", show_images=True, params_loc='./alphafold/data', verbose=True):
+                  pad_feats=False, rank_by="pLDDT", show_images=True, params_loc='./alphafold/data', verbose=True, user_perturbation=False):
   
   def do_subsample_msa(F, random_seed=0):
     '''subsample msa to avoid running out of memory'''
@@ -670,7 +680,7 @@ def run_alphafold(feature_dict, opt=None, runner=None, num_models=5, num_samples
 
   def parse_results(prediction_result, processed_feature_dict, r, t, num_res):
     '''parse results and convert to numpy arrays'''
-    
+    print(prediction_result.keys())
     to_np = lambda a: np.asarray(a)
     def class_to_np(c):
       class dict2obj():
@@ -695,7 +705,9 @@ def run_alphafold(feature_dict, opt=None, runner=None, num_models=5, num_samples
            "tol":to_np(t)}
     if "ptm" in prediction_result:
       out["pae"] = to_np(prediction_result['predicted_aligned_error'][:num_res,:][:,:num_res])
-      out["pTMscore"] = to_np(prediction_result['ptm'])      
+      out["pTMscore"] = to_np(prediction_result['ptm'])
+    if "representations" in prediction_result.keys():
+        out["representations"] = prediction_result["representations"]
     return out
 
   num_res = len(feature_dict["residue_index"])
@@ -731,7 +743,7 @@ def run_alphafold(feature_dict, opt=None, runner=None, num_models=5, num_samples
   with tqdm.notebook.tqdm(total=total, bar_format=TQDM_BAR_FORMAT, disable=disable_tqdm) as pbar:
     if opt["use_turbo"]:
       if runner is None:
-        runner = prep_model_runner(opt,params_loc=params_loc)
+        runner = prep_model_runner(opt,params_loc=params_loc,user_perturbation=user_perturbation)
       
       # go through each random_seed
       for seed in range(num_samples):
@@ -749,6 +761,10 @@ def run_alphafold(feature_dict, opt=None, runner=None, num_models=5, num_samples
 
           # replace model parameters
           params = data.get_model_haiku_params(name, params_loc)
+          current_array = params[user_perturbation[0]][user_perturbation[1]] 
+          low, high = np.min(current_array),np.max(current_array)
+          stdev = user_perturbation[2]
+          params[user_perturbation[0]][user_perturbation[1]] += np.random.normal(0.0,stdev*(high-low),size=current_array.shape)
           for k in runner["model"].params.keys():
             runner["model"].params[k] = params[k]
 

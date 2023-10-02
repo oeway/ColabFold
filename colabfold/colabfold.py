@@ -67,16 +67,9 @@ def clear_mem(device="gpu"):
 TQDM_BAR_FORMAT = '{l_bar}{bar}| {n_fmt}/{total_fmt} [elapsed: {elapsed} remaining: {remaining}]'
 
 def run_mmseqs2(x, prefix, use_env=True, use_filter=True,
-                use_templates=False, filter=None, use_pairing=False, pairing_strategy="greedy",
-                host_url="https://api.colabfold.com",
-                user_agent: str = "") -> Tuple[List[str], List[str]]:
+                use_templates=False, filter=None, use_pairing=False,
+                host_url="https://api.colabfold.com") -> Tuple[List[str], List[str]]:
   submission_endpoint = "ticket/pair" if use_pairing else "ticket/msa"
-
-  headers = {}
-  if user_agent != "":
-    headers['User-Agent'] = user_agent
-  else:
-    logger.warning("No user agent specified. Please set a user agent (e.g., 'toolname/version contact@email') to help us debug in case of problems. This warning will become an error in the future.")
 
   def submit(seqs, mode, N=101):
     n, query = N, ""
@@ -84,25 +77,7 @@ def run_mmseqs2(x, prefix, use_env=True, use_filter=True,
       query += f">{n}\n{seq}\n"
       n += 1
 
-    while True:
-      error_count = 0
-      try:
-        # https://requests.readthedocs.io/en/latest/user/advanced/#advanced
-        # "good practice to set connect timeouts to slightly larger than a multiple of 3"
-        res = requests.post(f'{host_url}/{submission_endpoint}', data={ 'q': query, 'mode': mode }, timeout=6.02, headers=headers)
-      except requests.exceptions.Timeout:
-        logger.warning("Timeout while submitting to MSA server. Retrying...")
-        continue
-      except Exception as e:
-        error_count += 1
-        logger.warning(f"Error while fetching result from MSA server. Retrying... ({error_count}/5)")
-        logger.warning(f"Error: {e}")
-        time.sleep(5)
-        if error_count > 5:
-          raise
-        continue
-      break
-
+    res = requests.post(f'{host_url}/{submission_endpoint}', data={'q':query,'mode': mode})
     try:
       out = res.json()
     except ValueError:
@@ -111,22 +86,7 @@ def run_mmseqs2(x, prefix, use_env=True, use_filter=True,
     return out
 
   def status(ID):
-    while True:
-      error_count = 0
-      try:
-        res = requests.get(f'{host_url}/ticket/{ID}', timeout=6.02, headers=headers)
-      except requests.exceptions.Timeout:
-        logger.warning("Timeout while fetching status from MSA server. Retrying...")
-        continue
-      except Exception as e:
-        error_count += 1
-        logger.warning(f"Error while fetching result from MSA server. Retrying... ({error_count}/5)")
-        logger.warning(f"Error: {e}")
-        time.sleep(5)
-        if error_count > 5:
-          raise
-        continue
-      break
+    res = requests.get(f'{host_url}/ticket/{ID}')
     try:
       out = res.json()
     except ValueError:
@@ -135,22 +95,7 @@ def run_mmseqs2(x, prefix, use_env=True, use_filter=True,
     return out
 
   def download(ID, path):
-    error_count = 0
-    while True:
-      try:
-        res = requests.get(f'{host_url}/result/download/{ID}', timeout=6.02, headers=headers)
-      except requests.exceptions.Timeout:
-        logger.warning("Timeout while fetching result from MSA server. Retrying...")
-        continue
-      except Exception as e:
-        error_count += 1
-        logger.warning(f"Error while fetching result from MSA server. Retrying... ({error_count}/5)")
-        logger.warning(f"Error: {e}")
-        time.sleep(5)
-        if error_count > 5:
-          raise
-        continue
-      break
+    res = requests.get(f'{host_url}/result/download/{ID}')
     with open(path,"wb") as out: out.write(res.content)
 
   # process input x
@@ -167,14 +112,9 @@ def run_mmseqs2(x, prefix, use_env=True, use_filter=True,
     mode = "env-nofilter" if use_env else "nofilter"
 
   if use_pairing:
+    mode = ""
     use_templates = False
     use_env = False
-    mode = ""
-    # greedy is default, complete was the previous behavior
-    if pairing_strategy == "greedy":
-      mode = "pairgreedy"
-    elif pairing_strategy == "complete":
-      mode = "paircomplete"
 
   # define path
   path = f"{prefix}_{mode}"
@@ -271,30 +211,9 @@ def run_mmseqs2(x, prefix, use_env=True, use_filter=True,
       if not os.path.isdir(TMPL_PATH):
         os.mkdir(TMPL_PATH)
         TMPL_LINE = ",".join(TMPL[:20])
-        response = None
-        while True:
-          error_count = 0
-          try:
-            # https://requests.readthedocs.io/en/latest/user/advanced/#advanced
-            # "good practice to set connect timeouts to slightly larger than a multiple of 3"
-            response = requests.get(f"{host_url}/template/{TMPL_LINE}", stream=True, timeout=6.02, headers=headers)
-          except requests.exceptions.Timeout:
-            logger.warning("Timeout while submitting to template server. Retrying...")
-            continue
-          except Exception as e:
-            error_count += 1
-            logger.warning(f"Error while fetching result from template server. Retrying... ({error_count}/5)")
-            logger.warning(f"Error: {e}")
-            time.sleep(5)
-            if error_count > 5:
-              raise
-            continue
-          break
-        with tarfile.open(fileobj=response.raw, mode="r|gz") as tar:
-          tar.extractall(path=TMPL_PATH)
-        os.symlink("pdb70_a3m.ffindex", f"{TMPL_PATH}/pdb70_cs219.ffindex")
-        with open(f"{TMPL_PATH}/pdb70_cs219.ffdata", "w") as f:
-          f.write("")
+        os.system(f"curl -s -L {host_url}/template/{TMPL_LINE} | tar xzf - -C {TMPL_PATH}/")
+        os.system(f"cp {TMPL_PATH}/pdb70_a3m.ffindex {TMPL_PATH}/pdb70_cs219.ffindex")
+        os.system(f"touch {TMPL_PATH}/pdb70_cs219.ffdata")
       template_paths[k] = TMPL_PATH
 
   # gather a3m lines
@@ -450,8 +369,7 @@ def plot_plddt_legend(dpi=100):
   plt.axis(False)
   return plt
 
-def plot_ticks(Ls, axes=None):
-  if axes is None: axes = plt.gca()
+def plot_ticks(Ls):
   Ln = sum(Ls)
   L_prev = 0
   for L_i in Ls[:-1]:
@@ -461,8 +379,7 @@ def plot_ticks(Ls, axes=None):
     plt.plot([L,L],[0,Ln],color="black")
   ticks = np.cumsum([0]+Ls)
   ticks = (ticks[1:] + ticks[:-1])/2
-  axes.set_yticks(ticks)
-  axes.set_yticklabels(alphabet_list[:len(ticks)])
+  plt.yticks(ticks,alphabet_list[:len(ticks)])
 
 def plot_confidence(plddt, pae=None, Ls=None, dpi=100):
   use_ptm = False if pae is None else True
@@ -513,7 +430,7 @@ def plot_msas(msa, ori_seq=None, sort_by_seqid=True, deduplicate=True, dpi=100, 
     qid_ = msa_ == np.array(list("".join(seqs)))
     gapid = np.stack([gap_[:,Ln[i]:Ln[i+1]].max(-1) for i in range(len(seqs))],-1)
     seqid = np.stack([qid_[:,Ln[i]:Ln[i+1]].mean(-1) for i in range(len(seqs))],-1).sum(-1) / (gapid.sum(-1) + 1e-8)
-    non_gaps = gap_.astype(float)
+    non_gaps = gap_.astype(np.float)
     non_gaps[non_gaps == 0] = np.nan
     if sort_by_seqid:
       lines.append(non_gaps[seqid.argsort()]*seqid[seqid.argsort(),None])
@@ -628,16 +545,13 @@ def plot_paes(paes, Ls=None, dpi=100, fig=True):
   num_models = len(paes)
   if fig: plt.figure(figsize=(3*num_models,2), dpi=dpi)
   for n,pae in enumerate(paes):
-    axes = plt.subplot(1,num_models,n+1)
-    plot_pae(pae, axes, caption = f"rank_{n+1}", Ls=Ls)
+    plt.subplot(1,num_models,n+1)
+    plt.title(f"rank_{n+1}")
+    Ln = pae.shape[0]
+    plt.imshow(pae,cmap="bwr",vmin=0,vmax=30,extent=(0, Ln, Ln, 0))
+    if Ls is not None and len(Ls) > 1: plot_ticks(Ls)
+    plt.colorbar()
   return plt
-
-def plot_pae(pae, axes, caption='PAE', caption_pad=None, Ls=None, colorkey_size=1.0):
-  axes.set_title(caption, pad=caption_pad)
-  Ln = pae.shape[0]
-  image = axes.imshow(pae,cmap="bwr",vmin=0,vmax=30,extent=(0, Ln, Ln, 0))
-  if Ls is not None and len(Ls) > 1: plot_ticks(Ls, axes=axes)
-  plt.colorbar(mappable=image, ax=axes, shrink=colorkey_size)
 
 def plot_adjs(adjs, Ls=None, dpi=100, fig=True):
   num_models = len(adjs)
@@ -667,10 +581,10 @@ def plot_dists(dists, Ls=None, dpi=100, fig=True):
 ##########################################################################
 
 def kabsch(a, b, weights=None, return_v=False):
-  a = np.asarray(a,float)
-  b = np.asarray(b,float)
+  a = np.asarray(a)
+  b = np.asarray(b)
   if weights is None: weights = np.ones(len(b))
-  else: weights = np.asarray(weights,float)
+  else: weights = np.asarray(weights)
   B = np.einsum('ji,jk->ik', weights[:, None] * a, b)
   u, s, vh = np.linalg.svd(B)
   if np.linalg.det(u @ vh) < 0: u[:, -1] = -u[:, -1]
@@ -709,7 +623,7 @@ def plot_pseudo_3D(xyz, c=None, ax=None, chainbreak=5,
   
   if chainbreak is not None:
     dist = np.linalg.norm(xyz[:-1] - xyz[1:], axis=-1)
-    colors[...,3] = (dist < chainbreak).astype(float)
+    colors[...,3] = (dist < chainbreak).astype(np.float)
 
   # add shade/tint based on z-dimension
   z = rescale(seg_z,zmin,zmax)[:,None]
@@ -749,15 +663,21 @@ def add_text(text, ax):
   return plt.text(0.5, 1.01, text, horizontalalignment='center',
                   verticalalignment='bottom', transform=ax.transAxes)
 
-def plot_protein(protein=None, pos=None, plddt=None, Ls=None,
-                 dpi=100, best_view=True, line_w=2.0):
+def plot_protein(protein=None, pos=None, plddt=None, Ls=None, dpi=100, best_view=True, line_w=2.0):
   
   if protein is not None:
     pos = np.asarray(protein.atom_positions[:,1,:])
     plddt = np.asarray(protein.b_factors[:,0])
 
+  # get best view
   if best_view:
-    pos = protein_best_view(pos, plddt=plddt)
+    if plddt is not None:
+      weights = plddt/100
+      pos = pos - (pos * weights[:,None]).sum(0,keepdims=True) / weights.sum()
+      pos = pos @ kabsch(pos, pos, weights, return_v=True)
+    else:
+      pos = pos - pos.mean(0,keepdims=True)
+      pos = pos @ kabsch(pos, pos, return_v=True)
 
   if plddt is not None:
     fig, (ax1, ax2) = plt.subplots(1,2)
@@ -771,61 +691,28 @@ def plot_protein(protein=None, pos=None, plddt=None, Ls=None,
   fig.set_dpi(dpi)
   fig.subplots_adjust(top = 0.9, bottom = 0.1, right = 1, left = 0, hspace = 0, wspace = 0)
 
+  xy_min = pos[...,:2].min() - line_w
+  xy_max = pos[...,:2].max() + line_w
+  for a in ax:
+    a.set_xlim(xy_min, xy_max)
+    a.set_ylim(xy_min, xy_max)
+    a.axis(False)
+
   if Ls is None or len(Ls) == 1:
     # color N->C
-    plot_protein_backbone(pos=pos, coloring='N-C', best_view=False, line_w=line_w, axes=ax1)
+    c = np.arange(len(pos))[::-1]
+    plot_pseudo_3D(pos,  line_w=line_w, ax=ax1)
     add_text("colored by N→C", ax1)
   else:
     # color by chain
-    plot_protein_backbone(pos=pos, coloring='chain', best_view=False, Ls=Ls, line_w=line_w, axes=ax1)
+    c = np.concatenate([[n]*L for n,L in enumerate(Ls)])
+    if len(Ls) > 40:   plot_pseudo_3D(pos, c=c, line_w=line_w, ax=ax1)
+    else:              plot_pseudo_3D(pos, c=c, cmap=pymol_cmap, cmin=0, cmax=39, line_w=line_w, ax=ax1)
     add_text("colored by chain", ax1)
     
   if plddt is not None:
     # color by pLDDT
-    plot_protein_backbone(pos=pos, coloring='plddt', best_view=False, plddt=plddt, line_w=line_w, axes=ax2)
+    plot_pseudo_3D(pos, c=plddt, cmin=50, cmax=90, line_w=line_w, ax=ax2)
     add_text("colored by pLDDT", ax2)
 
   return fig
-
-def protein_best_view(pos, plddt=None):
-  if plddt is not None:
-    weights = plddt/100
-    pos = pos - (pos * weights[:,None]).sum(0,keepdims=True) / weights.sum()
-    pos = pos @ kabsch(pos, pos, weights, return_v=True)
-  else:
-    pos = pos - pos.mean(0,keepdims=True)
-    pos = pos @ kabsch(pos, pos, return_v=True)
-  return pos
-
-def plot_protein_backbone(protein=None, pos=None, plddt=None,
-                          axes=None, coloring='plddt', Ls=None,
-                          best_view=True, line_w=2.0):
-  import numpy as np
-  if protein is not None:
-    if pos is None:
-      pos = np.asarray(protein.atom_positions[:,1,:])
-    if plddt is None:
-      plddt = np.asarray(protein.b_factors[:,0])
-
-  if best_view:
-    pos = protein_best_view(pos, plddt=plddt)
-    
-  xy_min = pos[...,:2].min() - line_w
-  xy_max = pos[...,:2].max() + line_w
-  axes.set_xlim(xy_min, xy_max)
-  axes.set_ylim(xy_min, xy_max)
-  axes.axis(False)
-
-  if coloring == 'N-C':
-    # color N->C
-    plot_pseudo_3D(pos,  line_w=line_w, ax=axes)
-  elif coloring == 'plddt':
-    # color by pLDDT
-    plot_pseudo_3D(pos, c=plddt, cmin=50, cmax=90, line_w=line_w, ax=axes)
-  elif coloring == 'chain':
-    # color by chain
-    c = np.concatenate([[n]*L for n,L in enumerate(Ls)])
-    nchain = len(Ls)
-    if nchain > 40:   plot_pseudo_3D(pos, c=c, line_w=line_w, ax=axes)
-    else:             plot_pseudo_3D(pos, c=c, cmap=pymol_cmap, cmin=0, cmax=39,
-                                     line_w=line_w, ax=axes)

@@ -19,14 +19,12 @@ If you're sure you want to run without a GPU, pass `--cpu`"""
 
 DEFAULT_API_SERVER = "https://api.colabfold.com"
 
-ACCEPT_DEFAULT_TERMS = \
-"""
-WARNING: You are welcome to use the default MSA server, however keep in mind that it's a
-limited shared resource only capable of processing a few thousand MSAs per day. Please
-submit jobs only from a single IP address. We reserve the right to limit access to the
-server case-by-case when usage exceeds fair use. If you require more MSAs: You can 
-precompute all MSAs with `colabfold_search` or host your own API and pass it to `--host-url`
-"""
+ACCEPT_DEFAULT_TERMS = """WARNING: You are welcome to use the default MSA server, however keep in mind that it's a limited shared resource only capable of processing a few thousand MSAs per day. Please submit jobs only from a single IP address. We reserve the right to limit access to the server case-by-case when usage exceeds fair use.
+
+If you require more MSAs:\n
+* You can precompute all MSAs with `colabfold_search` or\n
+* You can host your own API and pass it to `--host-url`"""
+
 
 class TqdmHandler(logging.StreamHandler):
     """https://stackoverflow.com/a/38895482/3549270"""
@@ -122,10 +120,6 @@ mmcif_order = {
 
 class CFMMCIFIO(MMCIFIO):
     def _save_dict(self, out_file):
-        asym_id_auth_to_label = dict(
-            zip(self.dic.get("_atom_site.auth_asym_id", ()),
-                self.dic.get("_atom_site.label_asym_id", ())))
-
         # Form dictionary where key is first part of mmCIF key and value is list
         # of corresponding second parts
         key_lists = {}
@@ -174,9 +168,6 @@ _entity_poly_seq.hetero
                 for chain in model:
                     res_idx = 1
                     for residue in chain:
-                        hetatm, _, _ = residue.get_id()
-                        if hetatm != " ":
-                            continue
                         poly_seq.append(
                             (chain_idx, res_idx, residue.get_resname(), "n")
                         )
@@ -203,8 +194,7 @@ _struct_asym.entity_id
             chain_idx = 1
             for model in self.structure:
                 for chain in model:
-                    label_asym_id = asym_id_auth_to_label[chain.get_id()]
-                    out_file.write(f"{label_asym_id} {chain_idx}\n")
+                    out_file.write(f"{chain.get_id()} {chain_idx}\n")
                     chain_idx += 1
             out_file.write("#\n")
 

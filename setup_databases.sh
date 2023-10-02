@@ -3,10 +3,6 @@
 ARIA_NUM_CONN=8
 WORKDIR="${1:-$(pwd)}"
 
-PDB_SERVER="${2:-"rsync.wwpdb.org::ftp"}"
-PDB_PORT="${3:-"33444"}"
-UNIREF30DB="uniref30_2302"
-
 cd "${WORKDIR}"
 
 hasCommand () {
@@ -44,49 +40,19 @@ downloadFile() {
     fail "Could not download $URL to $OUTPUT"
 }
 
-# Make MMseqs2 merge the databases to avoid spamming the folder with files
-export MMSEQS_FORCE_MERGE=1
-
 if [ ! -f UNIREF30_READY ]; then
-  downloadFile "https://wwwuser.gwdg.de/~compbiol/colabfold/${UNIREF30DB}.tar.gz" "${UNIREF30DB}.tar.gz"
-  tar xzvf "${UNIREF30DB}.tar.gz"
-  mmseqs tsv2exprofiledb "${UNIREF30DB}" "${UNIREF30DB}_db"
-  mmseqs createindex "${UNIREF30DB}_db" tmp1 --remove-tmp-files 1
-  if [ -e ${UNIREF30DB}_db_mapping ]; then
-    ln -sf ${UNIREF30DB}_db_mapping ${UNIREF30DB}_db.idx_mapping
-  fi
-  if [ -e ${UNIREF30DB}_db_taxonomy ]; then
-    ln -sf ${UNIREF30DB}_db_taxonomy ${UNIREF30DB}_db.idx_taxonomy
-  fi
+  downloadFile "http://wwwuser.gwdg.de/~compbiol/colabfold/uniref30_2103.tar.gz" "uniref30_2103.tar.gz"
+  tar xzvf "uniref30_2103.tar.gz"
+  mmseqs tsv2exprofiledb "uniref30_2103" "uniref30_2103_db"
+  mmseqs createindex "uniref30_2103_db" tmp1 --remove-tmp-files 1
   touch UNIREF30_READY
 fi
 
 if [ ! -f COLABDB_READY ]; then
-  downloadFile "https://wwwuser.gwdg.de/~compbiol/colabfold/colabfold_envdb_202108.tar.gz" "colabfold_envdb_202108.tar.gz"
+  downloadFile "http://wwwuser.gwdg.de/~compbiol/colabfold/colabfold_envdb_202108.tar.gz" "colabfold_envdb_202108.tar.gz"
   tar xzvf "colabfold_envdb_202108.tar.gz"
   mmseqs tsv2exprofiledb "colabfold_envdb_202108" "colabfold_envdb_202108_db"
   # TODO: split memory value for createindex?
   mmseqs createindex "colabfold_envdb_202108_db" tmp2 --remove-tmp-files 1
   touch COLABDB_READY
-fi
-
-if [ ! -f PDB_READY ]; then
-  downloadFile "https://wwwuser.gwdg.de/~compbiol/colabfold/pdb70_220313.fasta.gz" "pdb70_220313.fasta.gz"
-  mmseqs createdb pdb70_220313.fasta.gz pdb70_220313
-  mmseqs createindex pdb70_220313 tmp3 --remove-tmp-files 1
-  touch PDB_READY
-fi
-
-if [ ! -f PDB70_READY ]; then
-  downloadFile "https://wwwuser.gwdg.de/~compbiol/data/hhsuite/databases/hhsuite_dbs/pdb70_from_mmcif_220313.tar.gz" "pdb70_from_mmcif_220313.tar.gz"
-  tar xzvf pdb70_from_mmcif_220313.tar.gz pdb70_a3m.ffdata pdb70_a3m.ffindex
-  touch PDB70_READY
-fi
-
-if [ ! -f PDB_MMCIF_READY ]; then
-  mkdir -p pdb/divided
-  mkdir -p pdb/obsolete
-  rsync -rlpt -v -z --delete --port=${PDB_PORT} ${PDB_SERVER}/data/structures/divided/mmCIF/ pdb/divided
-  rsync -rlpt -v -z --delete --port=${PDB_PORT} ${PDB_SERVER}/data/structures/obsolete/mmCIF/ pdb/obsolete
-  touch PDB_MMCIF_READY
 fi
